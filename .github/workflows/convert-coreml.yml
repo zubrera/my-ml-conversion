@@ -1,10 +1,12 @@
-﻿name: Convert MiniLM to CoreML
+# .github/workflows/convert-coreml.yml
+
+name: Convert MiniLM to CoreML
 
 on:
   workflow_dispatch:
     inputs:
       model_path:
-        description: 'Pfad zur ONNX-Datei'
+        description: 'Pfad zur ONNX- oder TorchScript-Datei'
         required: true
         default: 'models/all_minilm_l6_v2.onnx'
       output_name:
@@ -26,19 +28,34 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install torch==1.12.1 coremltools==6.0 sentence-transformers==2.2.2 scikit-learn==1.1.2 numpy==1.19.5
+          pip install torch==1.12.1 coremltools==6.0 sentence-transformers==2.2.2 \
+                      scikit-learn==1.1.2 numpy==1.19.5
 
       - name: Convert to CoreML
         run: |
           python3 - <<EOF
-          import coremltools as ct
-          mlmodel = ct.converters.onnx.convert('${{ github.event.inputs.model_path }}', source='onnx')
+          import torch, coremltools as ct
+          from sentence_transformers import SentenceTransformer
+
+          path = '${{ github.event.inputs.model_path }}'
+          if path.endswith('.onnx'):
+              mlmodel = ct.converters.onnx.convert(path, source='onnx')
+          else:
+              model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+              encoder = model._first_module().auto_model.eval()
+              dummy = torch.randint(0, encoder.config.vocab_size, (1,128))
+              traced = torch.jit.trace(encoder, dummy, strict=False)
+              mlmodel = ct.convert(
+                  traced,
+                  inputs=[ct.TensorType(name="input_ids", shape=dummy.shape, dtype=int)],
+                  convert_to="mlprogram",
+                  minimum_deployment_target=ct.target.iOS15
+              )
           mlmodel.save('${{ github.event.inputs.output_name }}')
-          print("✅ Konvertierung abgeschlossen")
           EOF
 
       - name: Upload CoreML artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: coreml-model
           path: ${{ github.event.inputs.output_name }}
