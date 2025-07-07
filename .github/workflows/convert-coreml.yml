@@ -29,7 +29,8 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           pip install torch==1.12.1 coremltools==6.0 sentence-transformers==2.2.2 \
-                      scikit-learn==1.1.2 numpy==1.19.5
+                      scikit-learn==1.1.2 numpy==1.23.5
+
 
       - name: Convert to CoreML
         run: |
