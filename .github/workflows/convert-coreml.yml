@@ -5,12 +5,8 @@ name: Convert MiniLM to CoreML
 on:
   workflow_dispatch:
     inputs:
-      model_path:
-        description: 'Path to ONNX or TorchScript model'
-        required: true
-        default: 'models/all_minilm_l6_v2.onnx'
       output_name:
-        description: 'Name of the .mlmodel output'
+        description: 'Name der .mlmodel-Datei'
         required: true
         default: 'MiniLM_L6_v2.mlmodel'
 
@@ -18,59 +14,55 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python3 -m pip install --upgrade pip
           pip install \
             torch==1.12.1 \
             coremltools==6.0 \
             sentence-transformers==2.2.2 \
-            transformers==4.26.1 \
-            scikit-learn==1.1.2 \
             numpy==1.23.5 \
-            huggingface_hub==0.14.1
-      - name: Convert to CoreML
+            scikit-learn==1.1.2
+
+      - name: Convert PyTorch → CoreML
         run: |
           python3 - <<'EOF'
           import torch
           import coremltools as ct
           from sentence_transformers import SentenceTransformer
 
-          model_path = '${{ github.event.inputs.model_path }}'
-          output_name = '${{ github.event.inputs.output_name }}'
+          # Laden & eval setzen
+          st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+          encoder = st._first_module().auto_model.eval()
 
-          if model_path.lower().endswith('.onnx'):
-              # Unified API auto-detects ONNX
-              mlmodel = ct.convert(model_path)
-          else:
-              # Load and trace HuggingFace MiniLM encoder
-              st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-              encoder = st._first_module().auto_model.eval()
+          # Dummy-Input (1×128 IDs)
+          dummy = torch.randint(0, encoder.config.vocab_size, (1, 128))
 
-              # Create dummy input matching max sequence length (128)
-              dummy = torch.randint(0, encoder.config.vocab_size, (1, 128))
+          # Trace, strict=False um dict-Output zu umgehen
+          traced = torch.jit.trace(encoder, dummy, strict=False)
 
-              traced = torch.jit.trace(encoder, dummy, strict=False)
-              mlmodel = ct.convert(
-                  traced,
-                  inputs=[ct.TensorType(name="input_ids", shape=dummy.shape, dtype=int)],
-                  convert_to="mlprogram",
-                  minimum_deployment_target=ct.target.iOS15
-              )
+          # Konvertierung
+          mlmodel = ct.convert(
+              traced,
+              inputs=[ct.TensorType(name="input_ids", shape=dummy.shape, dtype=int)],
+              convert_to="mlprogram",
+              minimum_deployment_target=ct.target.iOS15
+          )
 
-          mlmodel.save(output_name)
-          print(f"✅ Saved CoreML model: {output_name}")
+          # Speichern
+          output = "${{ github.event.inputs.output_name }}"
+          mlmodel.save(output)
+          print(f"✅ Modell gespeichert als {output}")
           EOF
 
-      - name: Upload artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: coreml-model
