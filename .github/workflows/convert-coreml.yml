@@ -40,7 +40,7 @@ jobs:
 
           path = '${{ github.event.inputs.model_path }}'
           if path.endswith('.onnx'):
-              mlmodel = ct.converters.onnx.convert(path)
+              mlmodel = ct.converters.convert(path, source='onnx')
           else:
               model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
               encoder = model._first_module().auto_model.eval()
