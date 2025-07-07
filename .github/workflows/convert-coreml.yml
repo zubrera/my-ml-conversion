@@ -1,0 +1,44 @@
+﻿name: Convert MiniLM to CoreML
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_path:
+        description: 'Pfad zur ONNX-Datei'
+        required: true
+        default: 'models/all_minilm_l6_v2.onnx'
+      output_name:
+        description: 'Name der CoreML-Datei'
+        required: true
+        default: 'MiniLM_L6_v2.mlmodel'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install torch==1.12.1 coremltools==6.0 sentence-transformers==2.2.2 scikit-learn==1.1.2 numpy==1.19.5
+
+      - name: Convert to CoreML
+        run: |
+          python3 - <<EOF
+          import coremltools as ct
+          mlmodel = ct.converters.onnx.convert('${{ github.event.inputs.model_path }}', source='onnx')
+          mlmodel.save('${{ github.event.inputs.output_name }}')
+          print("✅ Konvertierung abgeschlossen")
+          EOF
+
+      - name: Upload CoreML artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: coreml-model
+          path: ${{ github.event.inputs.output_name }}
