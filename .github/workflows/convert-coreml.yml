@@ -21,13 +21,15 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
+          # Pinning huggingface_hub to 0.10.1 avoids cached_download error
           pip install \
             torch==1.12.1 \
             coremltools==6.0 \
-            sentence-transformers==2.2.2 \
+            transformers==4.26.1 \
+            huggingface_hub==0.10.1 \
             numpy==1.23.5 \
             scikit-learn==1.1.2
 
@@ -36,27 +38,35 @@ jobs:
           python3 - <<'EOF'
           import torch
           import coremltools as ct
-          from sentence_transformers import SentenceTransformer
+          from transformers import AutoModel, AutoTokenizer
 
-          # Laden & eval setzen
-          st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-          encoder = st._first_module().auto_model.eval()
+          # 1) Modell & Tokenizer laden
+          model = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+          model.eval()
+          tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
 
-          # Dummy-Input (1×128 IDs)
-          dummy = torch.randint(0, encoder.config.vocab_size, (1, 128))
+          # 2) Dummy-Tokenisierung (max_length=128)
+          inputs = tokenizer(
+              "Hello world", 
+              return_tensors="pt", 
+              max_length=128, 
+              padding="max_length", 
+              truncation=True
+          )
+          input_ids = inputs["input_ids"]
 
-          # Trace, strict=False um dict-Output zu umgehen
-          traced = torch.jit.trace(encoder, dummy, strict=False)
+          # 3) TorchScript trace (strict=False für mögliche dict-Ausgaben)
+          traced = torch.jit.trace(model, input_ids, strict=False)
 
-          # Konvertierung
+          # 4) CoreML-Konvertierung
           mlmodel = ct.convert(
               traced,
-              inputs=[ct.TensorType(name="input_ids", shape=dummy.shape, dtype=int)],
+              inputs=[ct.TensorType(name="input_ids", shape=input_ids.shape, dtype=int)],
               convert_to="mlprogram",
               minimum_deployment_target=ct.target.iOS15
           )
 
-          # Speichern
+          # 5) Speichern
           output = "${{ github.event.inputs.output_name }}"
           mlmodel.save(output)
           print(f"✅ Modell gespeichert als {output}")
